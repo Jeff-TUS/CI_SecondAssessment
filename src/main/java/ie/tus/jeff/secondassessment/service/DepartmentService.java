@@ -1,12 +1,12 @@
 package ie.tus.jeff.secondassessment.service;
 
 import ie.tus.jeff.secondassessment.exception.BusinessRuleException;
-import ie.tus.jeff.secondassessment.exception.ResourceNotFoundException;
 import ie.tus.jeff.secondassessment.model.Department;
 import ie.tus.jeff.secondassessment.repository.DepartmentRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Optional;
 
 @Service
 public class DepartmentService {
@@ -21,27 +21,29 @@ public class DepartmentService {
         return departmentRepository.findAll();
     }
 
-    public Department findById(Long id) {
-        return departmentRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Department not found with id: " + id));
+    public Optional<Department> findById(Long id) {
+        return departmentRepository.findById(id);
     }
 
-    public Department save(Department department) {
+    public Optional<Department> save(Department department) {
         if (departmentRepository.existsByNameIgnoreCase(department.getName())) {
             throw new BusinessRuleException(
                     "A department with the name '" + department.getName() + "' already exists");
         }
-        return departmentRepository.save(department);
+        return Optional.of(departmentRepository.save(department));
     }
 
-    public void deleteById(Long id) {
-        Department department = findById(id);
-        if (!department.getEmployees().isEmpty()) {
+    public boolean deleteById(Long id) {
+        Optional<Department> department = findById(id);
+        if (department.isEmpty()) {
+            return false;
+        }
+        if (!department.get().getEmployees().isEmpty()) {
             throw new BusinessRuleException(
                     "Cannot delete department with id: " + id +
-                            " — it still has " + department.getEmployees().size() + " employee(s)");
+                            " — it still has " + department.get().getEmployees().size() + " employee(s)");
         }
         departmentRepository.deleteById(id);
+        return true;
     }
 }

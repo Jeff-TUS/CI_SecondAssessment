@@ -1,5 +1,6 @@
 package ie.tus.jeff.secondassessment.controller;
 
+import ie.tus.jeff.secondassessment.exception.ResourceNotFoundException;
 import ie.tus.jeff.secondassessment.model.Employee;
 import ie.tus.jeff.secondassessment.service.EmployeeService;
 import jakarta.validation.Valid;
@@ -22,29 +23,42 @@ public class EmployeeController {
     // GET /departments/{deptId}/employees
     @GetMapping
     public ResponseEntity<List<Employee>> getAll(@PathVariable Long deptId) {
-        return ResponseEntity.ok(employeeService.findAllByDepartment(deptId));
+        return employeeService.findAllByDepartment(deptId)
+                .map(ResponseEntity::ok)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Department not found with id: " + deptId));
     }
 
     // GET /departments/{deptId}/employees/{empId}
     @GetMapping("/{empId}")
     public ResponseEntity<Employee> getById(@PathVariable Long deptId,
                                             @PathVariable Long empId) {
-        return ResponseEntity.ok(employeeService.findByIdAndDepartment(empId, deptId));
+        return employeeService.findByIdAndDepartment(empId, deptId)
+                .map(ResponseEntity::ok)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Employee not found with id: " + empId +
+                                " in department: " + deptId));
     }
 
     // POST /departments/{deptId}/employees
     @PostMapping
     public ResponseEntity<Employee> create(@PathVariable Long deptId,
                                            @Valid @RequestBody Employee employee) {
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(employeeService.save(deptId, employee));
+        return employeeService.save(deptId, employee)
+                .map(saved -> ResponseEntity.status(HttpStatus.CREATED).body(saved))
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Department not found with id: " + deptId));
     }
 
     // DELETE /departments/{deptId}/employees/{empId}
     @DeleteMapping("/{empId}")
     public ResponseEntity<Void> delete(@PathVariable Long deptId,
                                        @PathVariable Long empId) {
-        employeeService.deleteById(empId, deptId);
+        if (!employeeService.deleteById(empId, deptId)) {
+            throw new ResourceNotFoundException(
+                    "Employee not found with id: " + empId +
+                            " in department: " + deptId);
+        }
         return ResponseEntity.noContent().build();
     }
 }

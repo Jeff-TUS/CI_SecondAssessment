@@ -14,7 +14,7 @@ public class Department {
     private Long id;
 
     @NotBlank(message = "Department name is required")
-    @Column(nullable = false)
+    @Column(nullable = false, unique = true)
     private String name;
 
     @Column

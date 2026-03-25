@@ -28,6 +28,10 @@ public class DepartmentService {
     }
 
     public Department save(Department department) {
+        if (departmentRepository.existsByNameIgnoreCase(department.getName())) {
+            throw new BusinessRuleException(
+                    "A department with the name '" + department.getName() + "' already exists");
+        }
         return departmentRepository.save(department);
     }
 

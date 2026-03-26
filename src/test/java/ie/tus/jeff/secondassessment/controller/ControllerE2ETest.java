@@ -6,6 +6,7 @@ import ie.tus.jeff.secondassessment.model.Department;
 import ie.tus.jeff.secondassessment.model.Employee;
 import ie.tus.jeff.secondassessment.repository.DepartmentRepository;
 import ie.tus.jeff.secondassessment.repository.EmployeeRepository;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -50,6 +51,9 @@ class ControllerE2ETest {
     @Autowired
     private EmployeeRepository employeeRepository;
 
+    @Autowired
+    private EntityManager entityManager;
+
     // ── Fixtures persisted to H2 before each test ─────────────────────────────
 
     private Department engineering;
@@ -62,6 +66,13 @@ class ControllerE2ETest {
         marketing   = departmentRepository.save(new Department("Marketing", "Cork"));
         alice       = employeeRepository.save(
                 new Employee("Alice Smith", "alice@example.com", "Developer", engineering));
+
+        // Flush writes to the DB, then clear the first-level (session) cache.
+        // Without this, DepartmentService.deleteById() fetches the 'engineering'
+        // entity from Hibernate's session cache — which still has an empty
+        // employees list — and incorrectly allows the delete to proceed.
+        entityManager.flush();
+        entityManager.clear();
     }
 
     // ═════════════════════════════════════════════════════════════════════════

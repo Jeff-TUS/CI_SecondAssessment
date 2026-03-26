@@ -39,6 +39,7 @@ public class DepartmentService {
             return false;
         }
         if (!department.get().getEmployees().isEmpty()) {
+            System.err.println("Found employees - cannot delete department with id: " + id);
             throw new BusinessRuleException(
                     "Cannot delete department with id: " + id +
                             " — it still has " + department.get().getEmployees().size() + " employee(s)");

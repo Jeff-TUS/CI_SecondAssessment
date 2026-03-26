@@ -1,6 +1,6 @@
 package ie.tus.jeff.secondassessment.controller;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectMapper;
 import ie.tus.jeff.secondassessment.exception.BusinessRuleException;
 import ie.tus.jeff.secondassessment.exception.GlobalExceptionHandler;
 import ie.tus.jeff.secondassessment.model.Department;

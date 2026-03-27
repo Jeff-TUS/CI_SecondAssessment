@@ -5,6 +5,7 @@ import tools.jackson.databind.ObjectMapper;
 import ie.tus.jeff.secondassessment.model.Department;
 import ie.tus.jeff.secondassessment.model.Employee;
 import ie.tus.jeff.secondassessment.service.EmployeeService;
+import ie.tus.jeff.secondassessment.util.ErrorResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -13,11 +14,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
 import java.util.List;
 import java.util.Optional;
 
-import static org.hamcrest.Matchers.*;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -31,6 +33,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * is replaced with a Mockito bean. These tests verify that routing,
  * content negotiation, validation, and exception handling all integrate
  * correctly within the MVC layer.
+ * Response bodies are deserialised into POJOs and asserted with AssertJ.
  */
 @WebMvcTest(EmployeeController.class)
 @DisplayName("EmployeeController — Integration Tests (@WebMvcTest)")
@@ -79,6 +82,20 @@ class EmployeeControllerIntegrationTest {
         } catch (Exception e) { throw new RuntimeException(e); }
     }
 
+    // ── Deserialisation helpers ───────────────────────────────────────────────
+
+    private Employee parseEmployee(MvcResult result) throws Exception {
+        return objectMapper.readValue(result.getResponse().getContentAsString(), Employee.class);
+    }
+
+    private Employee[] parseEmployeeArray(MvcResult result) throws Exception {
+        return objectMapper.readValue(result.getResponse().getContentAsString(), Employee[].class);
+    }
+
+    private ErrorResponse parseError(MvcResult result) throws Exception {
+        return objectMapper.readValue(result.getResponse().getContentAsString(), ErrorResponse.class);
+    }
+
     // ═════════════════════════════════════════════════════════════════════════
     // GET /departments/{deptId}/employees
     // ═════════════════════════════════════════════════════════════════════════
@@ -93,15 +110,18 @@ class EmployeeControllerIntegrationTest {
             when(employeeService.findAllByDepartment(1L))
                     .thenReturn(Optional.of(List.of(alice, bob)));
 
-            mockMvc.perform(get("/departments/1/employees").accept(MediaType.APPLICATION_JSON))
+            MvcResult result = mockMvc.perform(get("/departments/1/employees").accept(MediaType.APPLICATION_JSON))
                     .andExpect(status().isOk())
                     .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
-                    .andExpect(jsonPath("$", hasSize(2)))
-                    .andExpect(jsonPath("$[0].id", is(10)))
-                    .andExpect(jsonPath("$[0].name", is("Alice Smith")))
-                    .andExpect(jsonPath("$[0].email", is("alice@example.com")))
-                    .andExpect(jsonPath("$[0].jobTitle", is("Developer")))
-                    .andExpect(jsonPath("$[1].id", is(11)));
+                    .andReturn();
+
+            Employee[] employees = parseEmployeeArray(result);
+            assertThat(employees).hasSize(2);
+            assertThat(employees[0].getId()).isEqualTo(10L);
+            assertThat(employees[0].getName()).isEqualTo("Alice Smith");
+            assertThat(employees[0].getEmail()).isEqualTo("alice@example.com");
+            assertThat(employees[0].getJobTitle()).isEqualTo("Developer");
+            assertThat(employees[1].getId()).isEqualTo(11L);
         }
 
         @Test
@@ -110,9 +130,13 @@ class EmployeeControllerIntegrationTest {
             when(employeeService.findAllByDepartment(1L))
                     .thenReturn(Optional.of(List.of(alice)));
 
-            mockMvc.perform(get("/departments/1/employees").accept(MediaType.APPLICATION_JSON))
+            MvcResult result = mockMvc.perform(get("/departments/1/employees").accept(MediaType.APPLICATION_JSON))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$[0].department").doesNotExist());
+                    .andReturn();
+
+            // Deserialise and confirm the department field is null (not serialised)
+            Employee[] employees = parseEmployeeArray(result);
+            assertThat(employees[0].getDepartment()).isNull();
         }
 
         @Test
@@ -120,12 +144,16 @@ class EmployeeControllerIntegrationTest {
         void returns404WhenDeptMissing() throws Exception {
             when(employeeService.findAllByDepartment(99L)).thenReturn(Optional.empty());
 
-            mockMvc.perform(get("/departments/99/employees").accept(MediaType.APPLICATION_JSON))
+            MvcResult result = mockMvc.perform(get("/departments/99/employees").accept(MediaType.APPLICATION_JSON))
                     .andExpect(status().isNotFound())
-                    .andExpect(jsonPath("$.status", is(404)))
-                    .andExpect(jsonPath("$.error", is("Not Found")))
-                    .andExpect(jsonPath("$.message", containsString("99")))
-                    .andExpect(jsonPath("$.timestamp", notNullValue()));
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                    .andReturn();
+
+            ErrorResponse error = parseError(result);
+            assertThat(error.getStatus()).isEqualTo(404);
+            assertThat(error.getError()).isEqualTo("Not Found");
+            assertThat(error.getMessage()).contains("99");
+            assertThat(error.getTimestamp()).isNotNull();
         }
     }
 
@@ -143,11 +171,14 @@ class EmployeeControllerIntegrationTest {
             when(employeeService.findByIdAndDepartment(10L, 1L))
                     .thenReturn(Optional.of(alice));
 
-            mockMvc.perform(get("/departments/1/employees/10").accept(MediaType.APPLICATION_JSON))
+            MvcResult result = mockMvc.perform(get("/departments/1/employees/10").accept(MediaType.APPLICATION_JSON))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.id", is(10)))
-                    .andExpect(jsonPath("$.name", is("Alice Smith")))
-                    .andExpect(jsonPath("$.email", is("alice@example.com")));
+                    .andReturn();
+
+            Employee employee = parseEmployee(result);
+            assertThat(employee.getId()).isEqualTo(10L);
+            assertThat(employee.getName()).isEqualTo("Alice Smith");
+            assertThat(employee.getEmail()).isEqualTo("alice@example.com");
         }
 
         @Test
@@ -155,10 +186,13 @@ class EmployeeControllerIntegrationTest {
         void returns404WhenNotFound() throws Exception {
             when(employeeService.findByIdAndDepartment(99L, 1L)).thenReturn(Optional.empty());
 
-            mockMvc.perform(get("/departments/1/employees/99").accept(MediaType.APPLICATION_JSON))
+            MvcResult result = mockMvc.perform(get("/departments/1/employees/99").accept(MediaType.APPLICATION_JSON))
                     .andExpect(status().isNotFound())
-                    .andExpect(jsonPath("$.status", is(404)))
-                    .andExpect(jsonPath("$.timestamp", notNullValue()));
+                    .andReturn();
+
+            ErrorResponse error = parseError(result);
+            assertThat(error.getStatus()).isEqualTo(404);
+            assertThat(error.getTimestamp()).isNotNull();
         }
     }
 
@@ -177,12 +211,15 @@ class EmployeeControllerIntegrationTest {
             when(employeeService.save(eq(1L), any(Employee.class)))
                     .thenReturn(Optional.of(alice));
 
-            mockMvc.perform(post("/departments/1/employees")
+            MvcResult result = mockMvc.perform(post("/departments/1/employees")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(payload)))
                     .andExpect(status().isCreated())
-                    .andExpect(jsonPath("$.id", is(10)))
-                    .andExpect(jsonPath("$.name", is("Alice Smith")));
+                    .andReturn();
+
+            Employee employee = parseEmployee(result);
+            assertThat(employee.getId()).isEqualTo(10L);
+            assertThat(employee.getName()).isEqualTo("Alice Smith");
         }
 
         @Test
@@ -217,11 +254,14 @@ class EmployeeControllerIntegrationTest {
             Employee payload = new Employee("Alice Smith", "alice@example.com", "Developer", null);
             when(employeeService.save(eq(99L), any(Employee.class))).thenReturn(Optional.empty());
 
-            mockMvc.perform(post("/departments/99/employees")
+            MvcResult result = mockMvc.perform(post("/departments/99/employees")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(payload)))
                     .andExpect(status().isNotFound())
-                    .andExpect(jsonPath("$.status", is(404)));
+                    .andReturn();
+
+            ErrorResponse error = parseError(result);
+            assertThat(error.getStatus()).isEqualTo(404);
         }
     }
 
@@ -248,10 +288,13 @@ class EmployeeControllerIntegrationTest {
         void returns404WhenNotFound() throws Exception {
             when(employeeService.deleteById(99L, 1L)).thenReturn(false);
 
-            mockMvc.perform(delete("/departments/1/employees/99"))
+            MvcResult result = mockMvc.perform(delete("/departments/1/employees/99"))
                     .andExpect(status().isNotFound())
-                    .andExpect(jsonPath("$.status", is(404)))
-                    .andExpect(jsonPath("$.timestamp", notNullValue()));
+                    .andReturn();
+
+            ErrorResponse error = parseError(result);
+            assertThat(error.getStatus()).isEqualTo(404);
+            assertThat(error.getTimestamp()).isNotNull();
         }
     }
 }

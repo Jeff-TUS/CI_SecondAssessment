@@ -5,6 +5,7 @@ import ie.tus.jeff.secondassessment.exception.BusinessRuleException;
 import ie.tus.jeff.secondassessment.exception.GlobalExceptionHandler;
 import ie.tus.jeff.secondassessment.model.Department;
 import ie.tus.jeff.secondassessment.service.DepartmentService;
+import ie.tus.jeff.secondassessment.util.ErrorResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -15,15 +16,15 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
-import static org.hamcrest.Matchers.*;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -34,6 +35,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Uses Mockito + standalone MockMvc — no Spring context is loaded,
  * making these tests fast and isolated. The GlobalExceptionHandler is
  * wired in manually so HTTP error mappings are also exercised.
+ * Response bodies are deserialised into POJOs and asserted with AssertJ.
  */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("DepartmentController — Unit Tests")
@@ -81,6 +83,20 @@ class DepartmentControllerUnitTest {
         }
     }
 
+    // ── Deserialisation helpers ───────────────────────────────────────────────
+
+    private Department parseDepartment(MvcResult result) throws Exception {
+        return objectMapper.readValue(result.getResponse().getContentAsString(), Department.class);
+    }
+
+    private Department[] parseDepartmentArray(MvcResult result) throws Exception {
+        return objectMapper.readValue(result.getResponse().getContentAsString(), Department[].class);
+    }
+
+    private ErrorResponse parseError(MvcResult result) throws Exception {
+        return objectMapper.readValue(result.getResponse().getContentAsString(), ErrorResponse.class);
+    }
+
     // ═════════════════════════════════════════════════════════════════════════
     // GET /departments
     // ═════════════════════════════════════════════════════════════════════════
@@ -94,13 +110,16 @@ class DepartmentControllerUnitTest {
         void returnsAllDepartments() throws Exception {
             when(departmentService.findAll()).thenReturn(List.of(engineering, marketing));
 
-            mockMvc.perform(get("/departments"))
+            MvcResult result = mockMvc.perform(get("/departments"))
                     .andExpect(status().isOk())
                     .andExpect(content().contentType(MediaType.APPLICATION_JSON))
-                    .andExpect(jsonPath("$", hasSize(2)))
-                    .andExpect(jsonPath("$[0].name", is("Engineering")))
-                    .andExpect(jsonPath("$[0].location", is("Dublin")))
-                    .andExpect(jsonPath("$[1].name", is("Marketing")));
+                    .andReturn();
+
+            Department[] departments = parseDepartmentArray(result);
+            assertThat(departments).hasSize(2);
+            assertThat(departments[0].getName()).isEqualTo("Engineering");
+            assertThat(departments[0].getLocation()).isEqualTo("Dublin");
+            assertThat(departments[1].getName()).isEqualTo("Marketing");
 
             verify(departmentService, times(1)).findAll();
         }
@@ -110,9 +129,12 @@ class DepartmentControllerUnitTest {
         void returnsEmptyListWhenNoDepartments() throws Exception {
             when(departmentService.findAll()).thenReturn(Collections.emptyList());
 
-            mockMvc.perform(get("/departments"))
+            MvcResult result = mockMvc.perform(get("/departments"))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$", hasSize(0)));
+                    .andReturn();
+
+            Department[] departments = parseDepartmentArray(result);
+            assertThat(departments).isEmpty();
         }
     }
 
@@ -129,11 +151,14 @@ class DepartmentControllerUnitTest {
         void returnsDepartmentWhenFound() throws Exception {
             when(departmentService.findById(1L)).thenReturn(Optional.of(engineering));
 
-            mockMvc.perform(get("/departments/1"))
+            MvcResult result = mockMvc.perform(get("/departments/1"))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.id", is(1)))
-                    .andExpect(jsonPath("$.name", is("Engineering")))
-                    .andExpect(jsonPath("$.location", is("Dublin")));
+                    .andReturn();
+
+            Department dept = parseDepartment(result);
+            assertThat(dept.getId()).isEqualTo(1L);
+            assertThat(dept.getName()).isEqualTo("Engineering");
+            assertThat(dept.getLocation()).isEqualTo("Dublin");
         }
 
         @Test
@@ -141,10 +166,13 @@ class DepartmentControllerUnitTest {
         void returns404WhenNotFound() throws Exception {
             when(departmentService.findById(99L)).thenReturn(Optional.empty());
 
-            mockMvc.perform(get("/departments/99"))
+            MvcResult result = mockMvc.perform(get("/departments/99"))
                     .andExpect(status().isNotFound())
-                    .andExpect(jsonPath("$.status", is(404)))
-                    .andExpect(jsonPath("$.message", containsString("99")));
+                    .andReturn();
+
+            ErrorResponse error = parseError(result);
+            assertThat(error.getStatus()).isEqualTo(404);
+            assertThat(error.getMessage()).contains("99");
         }
     }
 
@@ -163,12 +191,15 @@ class DepartmentControllerUnitTest {
             when(departmentService.save(any(Department.class)))
                     .thenReturn(Optional.of(engineering));
 
-            mockMvc.perform(post("/departments")
+            MvcResult result = mockMvc.perform(post("/departments")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(payload)))
                     .andExpect(status().isCreated())
-                    .andExpect(jsonPath("$.id", is(1)))
-                    .andExpect(jsonPath("$.name", is("Engineering")));
+                    .andReturn();
+
+            Department dept = parseDepartment(result);
+            assertThat(dept.getId()).isEqualTo(1L);
+            assertThat(dept.getName()).isEqualTo("Engineering");
         }
 
         @Test
@@ -198,12 +229,15 @@ class DepartmentControllerUnitTest {
                     .thenThrow(new BusinessRuleException(
                             "A department with the name 'Engineering' already exists"));
 
-            mockMvc.perform(post("/departments")
+            MvcResult result = mockMvc.perform(post("/departments")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(payload)))
                     .andExpect(status().isConflict())
-                    .andExpect(jsonPath("$.status", is(409)))
-                    .andExpect(jsonPath("$.message", containsString("Engineering")));
+                    .andReturn();
+
+            ErrorResponse error = parseError(result);
+            assertThat(error.getStatus()).isEqualTo(409);
+            assertThat(error.getMessage()).contains("Engineering");
         }
     }
 
@@ -231,10 +265,13 @@ class DepartmentControllerUnitTest {
         void returns404WhenNotFound() throws Exception {
             when(departmentService.deleteById(99L)).thenReturn(false);
 
-            mockMvc.perform(delete("/departments/99"))
+            MvcResult result = mockMvc.perform(delete("/departments/99"))
                     .andExpect(status().isNotFound())
-                    .andExpect(jsonPath("$.status", is(404)))
-                    .andExpect(jsonPath("$.message", containsString("99")));
+                    .andReturn();
+
+            ErrorResponse error = parseError(result);
+            assertThat(error.getStatus()).isEqualTo(404);
+            assertThat(error.getMessage()).contains("99");
         }
 
         @Test
@@ -244,10 +281,13 @@ class DepartmentControllerUnitTest {
                     .thenThrow(new BusinessRuleException(
                             "Cannot delete department with id: 1 — it still has 3 employee(s)"));
 
-            mockMvc.perform(delete("/departments/1"))
+            MvcResult result = mockMvc.perform(delete("/departments/1"))
                     .andExpect(status().isConflict())
-                    .andExpect(jsonPath("$.status", is(409)))
-                    .andExpect(jsonPath("$.message", containsString("employee(s)")));
+                    .andReturn();
+
+            ErrorResponse error = parseError(result);
+            assertThat(error.getStatus()).isEqualTo(409);
+            assertThat(error.getMessage()).contains("employee(s)");
         }
     }
 }

@@ -5,6 +5,7 @@ import ie.tus.jeff.secondassessment.exception.GlobalExceptionHandler;
 import ie.tus.jeff.secondassessment.model.Department;
 import ie.tus.jeff.secondassessment.model.Employee;
 import ie.tus.jeff.secondassessment.service.EmployeeService;
+import ie.tus.jeff.secondassessment.util.ErrorResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -15,13 +16,14 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 
-import static org.hamcrest.Matchers.*;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -33,6 +35,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * Uses Mockito + standalone MockMvc — no Spring context is loaded.
  * The GlobalExceptionHandler is wired in manually.
+ * Response bodies are deserialised into POJOs and asserted with AssertJ.
  */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("EmployeeController — Unit Tests")
@@ -90,6 +93,20 @@ class EmployeeControllerUnitTest {
         } catch (Exception e) { throw new RuntimeException(e); }
     }
 
+    // ── Deserialisation helpers ───────────────────────────────────────────────
+
+    private Employee parseEmployee(MvcResult result) throws Exception {
+        return objectMapper.readValue(result.getResponse().getContentAsString(), Employee.class);
+    }
+
+    private Employee[] parseEmployeeArray(MvcResult result) throws Exception {
+        return objectMapper.readValue(result.getResponse().getContentAsString(), Employee[].class);
+    }
+
+    private ErrorResponse parseError(MvcResult result) throws Exception {
+        return objectMapper.readValue(result.getResponse().getContentAsString(), ErrorResponse.class);
+    }
+
     // ═════════════════════════════════════════════════════════════════════════
     // GET /departments/{deptId}/employees
     // ═════════════════════════════════════════════════════════════════════════
@@ -104,14 +121,17 @@ class EmployeeControllerUnitTest {
             when(employeeService.findAllByDepartment(1L))
                     .thenReturn(Optional.of(List.of(alice, bob)));
 
-            mockMvc.perform(get("/departments/1/employees"))
+            MvcResult result = mockMvc.perform(get("/departments/1/employees"))
                     .andExpect(status().isOk())
                     .andExpect(content().contentType(MediaType.APPLICATION_JSON))
-                    .andExpect(jsonPath("$", hasSize(2)))
-                    .andExpect(jsonPath("$[0].name", is("Alice Smith")))
-                    .andExpect(jsonPath("$[0].email", is("alice@example.com")))
-                    .andExpect(jsonPath("$[0].jobTitle", is("Developer")))
-                    .andExpect(jsonPath("$[1].name", is("Bob Jones")));
+                    .andReturn();
+
+            Employee[] employees = parseEmployeeArray(result);
+            assertThat(employees).hasSize(2);
+            assertThat(employees[0].getName()).isEqualTo("Alice Smith");
+            assertThat(employees[0].getEmail()).isEqualTo("alice@example.com");
+            assertThat(employees[0].getJobTitle()).isEqualTo("Developer");
+            assertThat(employees[1].getName()).isEqualTo("Bob Jones");
 
             verify(employeeService, times(1)).findAllByDepartment(1L);
         }
@@ -122,9 +142,12 @@ class EmployeeControllerUnitTest {
             when(employeeService.findAllByDepartment(1L))
                     .thenReturn(Optional.of(Collections.emptyList()));
 
-            mockMvc.perform(get("/departments/1/employees"))
+            MvcResult result = mockMvc.perform(get("/departments/1/employees"))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$", hasSize(0)));
+                    .andReturn();
+
+            Employee[] employees = parseEmployeeArray(result);
+            assertThat(employees).isEmpty();
         }
 
         @Test
@@ -132,10 +155,13 @@ class EmployeeControllerUnitTest {
         void returns404WhenDepartmentNotFound() throws Exception {
             when(employeeService.findAllByDepartment(99L)).thenReturn(Optional.empty());
 
-            mockMvc.perform(get("/departments/99/employees"))
+            MvcResult result = mockMvc.perform(get("/departments/99/employees"))
                     .andExpect(status().isNotFound())
-                    .andExpect(jsonPath("$.status", is(404)))
-                    .andExpect(jsonPath("$.message", containsString("99")));
+                    .andReturn();
+
+            ErrorResponse error = parseError(result);
+            assertThat(error.getStatus()).isEqualTo(404);
+            assertThat(error.getMessage()).contains("99");
         }
     }
 
@@ -153,11 +179,14 @@ class EmployeeControllerUnitTest {
             when(employeeService.findByIdAndDepartment(10L, 1L))
                     .thenReturn(Optional.of(alice));
 
-            mockMvc.perform(get("/departments/1/employees/10"))
+            MvcResult result = mockMvc.perform(get("/departments/1/employees/10"))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.id", is(10)))
-                    .andExpect(jsonPath("$.name", is("Alice Smith")))
-                    .andExpect(jsonPath("$.email", is("alice@example.com")));
+                    .andReturn();
+
+            Employee employee = parseEmployee(result);
+            assertThat(employee.getId()).isEqualTo(10L);
+            assertThat(employee.getName()).isEqualTo("Alice Smith");
+            assertThat(employee.getEmail()).isEqualTo("alice@example.com");
         }
 
         @Test
@@ -166,16 +195,18 @@ class EmployeeControllerUnitTest {
             when(employeeService.findByIdAndDepartment(99L, 1L))
                     .thenReturn(Optional.empty());
 
-            mockMvc.perform(get("/departments/1/employees/99"))
+            MvcResult result = mockMvc.perform(get("/departments/1/employees/99"))
                     .andExpect(status().isNotFound())
-                    .andExpect(jsonPath("$.status", is(404)))
-                    .andExpect(jsonPath("$.message", containsString("99")));
+                    .andReturn();
+
+            ErrorResponse error = parseError(result);
+            assertThat(error.getStatus()).isEqualTo(404);
+            assertThat(error.getMessage()).contains("99");
         }
 
         @Test
         @DisplayName("returns 404 when employee exists but belongs to a different department")
         void returns404WhenEmployeeInWrongDepartment() throws Exception {
-            // Alice belongs to dept 1 — requesting under dept 2 should 404
             when(employeeService.findByIdAndDepartment(10L, 2L))
                     .thenReturn(Optional.empty());
 
@@ -199,13 +230,16 @@ class EmployeeControllerUnitTest {
             when(employeeService.save(eq(1L), any(Employee.class)))
                     .thenReturn(Optional.of(alice));
 
-            mockMvc.perform(post("/departments/1/employees")
+            MvcResult result = mockMvc.perform(post("/departments/1/employees")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(payload)))
                     .andExpect(status().isCreated())
-                    .andExpect(jsonPath("$.id", is(10)))
-                    .andExpect(jsonPath("$.name", is("Alice Smith")))
-                    .andExpect(jsonPath("$.email", is("alice@example.com")));
+                    .andReturn();
+
+            Employee employee = parseEmployee(result);
+            assertThat(employee.getId()).isEqualTo(10L);
+            assertThat(employee.getName()).isEqualTo("Alice Smith");
+            assertThat(employee.getEmail()).isEqualTo("alice@example.com");
         }
 
         @Test
@@ -215,11 +249,14 @@ class EmployeeControllerUnitTest {
             when(employeeService.save(eq(99L), any(Employee.class)))
                     .thenReturn(Optional.empty());
 
-            mockMvc.perform(post("/departments/99/employees")
+            MvcResult result = mockMvc.perform(post("/departments/99/employees")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(objectMapper.writeValueAsString(payload)))
                     .andExpect(status().isNotFound())
-                    .andExpect(jsonPath("$.message", containsString("99")));
+                    .andReturn();
+
+            ErrorResponse error = parseError(result);
+            assertThat(error.getMessage()).contains("99");
         }
 
         @Test
@@ -288,10 +325,13 @@ class EmployeeControllerUnitTest {
         void returns404WhenNotFound() throws Exception {
             when(employeeService.deleteById(99L, 1L)).thenReturn(false);
 
-            mockMvc.perform(delete("/departments/1/employees/99"))
+            MvcResult result = mockMvc.perform(delete("/departments/1/employees/99"))
                     .andExpect(status().isNotFound())
-                    .andExpect(jsonPath("$.status", is(404)))
-                    .andExpect(jsonPath("$.message", containsString("99")));
+                    .andReturn();
+
+            ErrorResponse error = parseError(result);
+            assertThat(error.getStatus()).isEqualTo(404);
+            assertThat(error.getMessage()).contains("99");
         }
     }
 }
